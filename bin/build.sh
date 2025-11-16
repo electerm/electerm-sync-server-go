@@ -28,11 +28,11 @@ esac
 
 # Set output name based on OS
 if [ "$OS" = "darwin" ]; then
-    OUTPUT="bin/electerm-sync-server-mac"
+    OUTPUT="output/electerm-sync-server-go"
 elif [ "$OS" = "linux" ]; then
-    OUTPUT="bin/electerm-sync-server-linux"
+    OUTPUT="output/electerm-sync-server-go"
 else
-    OUTPUT="bin/electerm-sync-server"
+    OUTPUT="output/electerm-sync-server-go"
 fi
 
 echo "Building for $OS/$ARCH..."

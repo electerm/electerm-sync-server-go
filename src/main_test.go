@@ -9,103 +9,176 @@ import (
 	"testing"
 	"time"
 
+	"github.com/electerm/electerm-sync-server-go/src/store"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestMain(m *testing.M) {
+type MainTestSuite struct {
+	suite.Suite
+	router  *gin.Engine
+	testDir string
+}
+
+func (suite *MainTestSuite) SetupSuite() {
 	// Set Gin to release mode for tests
 	gin.SetMode(gin.ReleaseMode)
 
-	// Setup test environment
-	setupTestEnv()
-
-	// Run tests
-	code := m.Run()
-
-	// Cleanup
-	cleanupTestEnv()
-
-	os.Exit(code)
-}
-
-func setupTestEnv() {
 	// Create test data directory
-	testDir := "test-data"
-	os.MkdirAll(testDir, 0755)
+	suite.testDir = "test-data.db"
 
 	// Set environment variables
 	os.Setenv("PORT", "7837")
 	os.Setenv("HOST", "127.0.0.1")
 	os.Setenv("JWT_SECRET", "test-secret")
-	os.Setenv("JWT_USERS", "testuser")
-	os.Setenv("FILE_STORE_PATH", testDir)
+	os.Setenv("JWT_USERS", "testuser,anotheruser")
+	os.Setenv("DB_PATH", suite.testDir)
+
+	// Initialize SQLite store
+	if err := store.SQLiteStore.Init(); err != nil {
+		panic("Failed to initialize SQLite store: " + err.Error())
+	}
+
+	suite.router = setupRouter()
 }
 
-func cleanupTestEnv() {
-	testDir := "test-data"
-	os.RemoveAll(testDir)
+func (suite *MainTestSuite) TearDownSuite() {
+	// Close SQLite store
+	store.SQLiteStore.Close()
+	// Cleanup
+	os.Remove(suite.testDir)
 }
 
-func generateTestToken(userId string) string {
+func (suite *MainTestSuite) generateTestToken(userId string) string {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"id":  userId,
-		"exp": time.Now().Add(time.Hour * 24).Unix(),
+		"exp": jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
 	})
 	tokenString, _ := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 	return tokenString
 }
 
-func TestIntegration(t *testing.T) {
-	r := setupRouter()
+func (suite *MainTestSuite) TestTestEndpoint() {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	suite.router.ServeHTTP(w, req)
 
-	t.Run("Test /test endpoint", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/test", nil)
-		r.ServeHTTP(w, req)
+	suite.Equal(200, w.Code)
+	suite.Equal("ok", w.Body.String())
+}
 
-		assert.Equal(t, 200, w.Code)
-		assert.Equal(t, "ok", w.Body.String())
-	})
+func (suite *MainTestSuite) TestUnauthorizedAccess() {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/sync", nil)
+	suite.router.ServeHTTP(w, req)
 
-	t.Run("Test unauthorized access", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/sync", nil)
-		r.ServeHTTP(w, req)
+	suite.Equal(401, w.Code)
+}
 
-		assert.Equal(t, 401, w.Code)
-	})
+func (suite *MainTestSuite) TestInvalidToken() {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/sync", nil)
+	req.Header.Set("Authorization", "Bearer invalid-token")
+	suite.router.ServeHTTP(w, req)
 
-	t.Run("Test sync workflow", func(t *testing.T) {
-		token := generateTestToken("testuser")
+	suite.Equal(401, w.Code)
+}
 
-		// Test PUT
-		testData := map[string]interface{}{
-			"test": "data",
-		}
-		jsonData, _ := json.Marshal(testData)
+func (suite *MainTestSuite) TestUnauthorizedUser() {
+	token := suite.generateTestToken("unauthorized-user")
 
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/sync", bytes.NewBuffer(jsonData))
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.router.ServeHTTP(w, req)
 
-		assert.Equal(t, 200, w.Code)
-		assert.Equal(t, "ok", w.Body.String())
+	suite.Equal(401, w.Code)
+}
 
-		// Test GET
-		w = httptest.NewRecorder()
-		req, _ = http.NewRequest("GET", "/api/sync", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		r.ServeHTTP(w, req)
+func (suite *MainTestSuite) TestSyncWorkflow() {
+	token := suite.generateTestToken("testuser")
 
-		assert.Equal(t, 200, w.Code)
+	// Test PUT with valid data
+	testData := map[string]interface{}{
+		"test": "data",
+		"nested": map[string]interface{}{
+			"key": "value",
+		},
+	}
+	jsonData, _ := json.Marshal(testData)
 
-		var responseData map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &responseData)
-		assert.NoError(t, err)
-		assert.Equal(t, "data", responseData["test"])
-	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/sync", bytes.NewBuffer(jsonData))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	suite.router.ServeHTTP(w, req)
+
+	suite.Equal(200, w.Code)
+	suite.Equal("ok", w.Body.String())
+
+	// Test GET
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.router.ServeHTTP(w, req)
+
+	suite.Equal(200, w.Code)
+
+	var responseData map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &responseData)
+	suite.NoError(err)
+	suite.Equal("data", responseData["test"])
+	suite.Equal("value", responseData["nested"].(map[string]interface{})["key"])
+}
+
+func (suite *MainTestSuite) TestSyncPost() {
+	token := suite.generateTestToken("testuser")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.router.ServeHTTP(w, req)
+
+	suite.Equal(200, w.Code)
+	suite.Equal("test ok", w.Body.String())
+}
+
+func (suite *MainTestSuite) TestSyncGetNotFound() {
+	token := suite.generateTestToken("testuser")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.router.ServeHTTP(w, req)
+
+	suite.Equal(404, w.Code)
+	suite.Equal("File not found", w.Body.String())
+}
+
+func (suite *MainTestSuite) TestSyncPutInvalidJSON() {
+	token := suite.generateTestToken("testuser")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/sync", bytes.NewBufferString("invalid json"))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	suite.router.ServeHTTP(w, req)
+
+	suite.Equal(400, w.Code)
+}
+
+func (suite *MainTestSuite) TestSyncMethodNotAllowed() {
+	token := suite.generateTestToken("testuser")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/api/sync", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	suite.router.ServeHTTP(w, req)
+
+	suite.Equal(405, w.Code)
+}
+
+func TestMainTestSuite(t *testing.T) {
+	suite.Run(t, new(MainTestSuite))
 }

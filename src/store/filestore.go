@@ -10,6 +10,20 @@ type FileStorage struct{}
 
 var FileStore = &FileStorage{}
 
+func (fs *FileStorage) Init() error {
+	storeDir := os.Getenv("FILE_STORE_PATH")
+	if storeDir == "" {
+		var err error
+		storeDir, err = os.Getwd()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Ensure directory exists
+	return os.MkdirAll(storeDir, 0755)
+}
+
 func (fs *FileStorage) Write(userId string, data interface{}) error {
 	storeDir := os.Getenv("FILE_STORE_PATH")
 	if storeDir == "" {

@@ -13,7 +13,7 @@ PORT=7837
 HOST=127.0.0.1
 JWT_SECRET=test-secret
 JWT_USERS=testuser
-FILE_STORE_PATH=./test-data
+DB_PATH=./test-data.db
 EOL
 
 echo "Created temporary test environment"
@@ -25,7 +25,7 @@ go get github.com/stretchr/testify/assert
 go test -v ./src/...
 
 # Clean up test data
-rm -rf test-data
+rm -f test-data.db
 rm test.env
 
 echo

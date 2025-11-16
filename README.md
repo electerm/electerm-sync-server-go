@@ -1,5 +1,8 @@
 # Electerm sync server go
 
+[![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
+[![中文](https://img.shields.io/badge/语言-中文-red.svg)](README_CN.md)
+
 A simple electerm data sync server with go.
 
 ## Use
@@ -39,11 +42,7 @@ For Unix-like systems (Linux/macOS):
 ./bin/build.sh
 
 # Run the server (after configuring .env)
-# For macOS:
-GIN_MODE=release ./bin/electerm-sync-server-mac
-
-# For Linux:
-GIN_MODE=release ./bin/electerm-sync-server-linux
+GIN_MODE=release ./output/electerm-sync-server-go
 ```
 
 ## Test
@@ -54,7 +53,7 @@ bin/test.sh
 
 ## Write your own data store
 
-Just take [src/store/filestore.go](src/store/filestore.go) as an example, write your own read/write method
+Just take [src/store/sql.go](src/store/sql.go) as an example, write your own read/write method. The default storage is now SQLite for better performance and reliability.
 
 ## Sync server in other languages
 
